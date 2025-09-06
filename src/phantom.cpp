@@ -1,7 +1,7 @@
 #include <windows.h>
 
-#define static local_persist
-#define static global_variable
+#define local_persist static
+#define global_variable static
 
 LRESULT CALLBACK MainWindowCallback(HWND, UINT, WPARAM, LPARAM);
 global_variable bool IsRunning;
