@@ -1,11 +1,15 @@
 #include <windows.h>
+#include <CommCtrl.h>
+#define FILE_MENU_CLOSE 0
 
 #define local_persist static
 #define global_variable static
 
 LRESULT CALLBACK MainWindowCallback(HWND, UINT, WPARAM, LPARAM);
+void SetupMenu(HWND);
+void SetupControls(HWND);
 global_variable bool IsRunning;
-
+global_variable HMENU Menu;
 
 int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
 {
@@ -22,7 +26,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
     HWND WindowHandle = CreateWindowEx(0, WindowClass.lpszClassName, "MainWindow",
 				       WS_OVERLAPPEDWINDOW|WS_VISIBLE, CW_USEDEFAULT,
 				       CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0,
-				       0, Instance, 0);
+				       Menu, Instance, 0);
     if(WindowHandle)
     {
       MSG Message;
@@ -64,6 +68,11 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
   LRESULT Result = 0;
   switch(Message)
   {
+    case WM_CREATE:
+    {
+      SetupMenu(Window);
+      SetupControls(Window);
+    }break;
     case WM_SIZE:
     {
       OutputDebugStringA("Received WM_SIZE Message\n");
@@ -71,7 +80,7 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
     
     case WM_DESTROY:
     {
-      // This might be an error, maybe recreate window?
+      //TODO: This might be an error, maybe recreate window?
       OutputDebugStringA("Received WM_DESTROY Message\n");
     }break;
     
@@ -89,6 +98,17 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
     case WM_MOVE:
     {
       OutputDebugStringA("Received WM_MOVE Message\n");
+    }break;
+
+    case WM_COMMAND:
+    {
+      switch(WParam)
+      {
+	case FILE_MENU_CLOSE:
+	{
+	  IsRunning = false;
+	}break;
+      }
     }break;
 
     case WM_PAINT:
@@ -116,4 +136,29 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
   }
   return(Result);
     
+}
+
+void SetupMenu(HWND WindowHandle)
+{
+  Menu = CreateMenu();
+
+  // File Menu
+  HMENU FileMenu = CreateMenu();
+  AppendMenu(FileMenu, MF_STRING, 0, "Close");
+
+
+  // Help Menu
+  HMENU HelpMenu = CreateMenu();
+  AppendMenu(HelpMenu, MF_STRING, 1, "About");
+  
+  // Main Menu
+  AppendMenu(Menu, MF_POPUP,(UINT_PTR)FileMenu, "File");
+  AppendMenu(Menu, MF_POPUP, (UINT_PTR)HelpMenu, "Help");
+  SetMenu(WindowHandle, Menu);
+}
+
+void SetupControls(HWND WindowHandle)
+{
+  HWND ListViewHandle =  CreateWindowEx(0, WC_LISTVIEW, "Some static text", SS_CENTER|WS_CHILD|WS_VISIBLE, 0, 0, 200, 200, WindowHandle, 0, 0, 0 );
+  
 }
