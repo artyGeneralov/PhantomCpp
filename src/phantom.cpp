@@ -1,9 +1,10 @@
 #include <windows.h>
 
-
+#define static local_persist
+#define static global_variable
 
 LRESULT CALLBACK MainWindowCallback(HWND, UINT, WPARAM, LPARAM);
-
+global_variable bool IsRunning;
 
 
 int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
@@ -18,23 +19,23 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
   if(RegisterClassEx(&WindowClass))
   {
 
-    HWND WindowHandle = CreateWindowEx(0, WindowClass.lpszClassName, "MainWindow", WS_OVERLAPPEDWINDOW|WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, Instance, 0);
+    HWND WindowHandle = CreateWindowEx(0, WindowClass.lpszClassName, "MainWindow",
+				       WS_OVERLAPPEDWINDOW|WS_VISIBLE, CW_USEDEFAULT,
+				       CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0,
+				       0, Instance, 0);
     if(WindowHandle)
     {
       MSG Message;
       BOOL msgRet;
-
-      for(;;)
+      
+      IsRunning = true;      
+      while(IsRunning)
       {
 	msgRet = GetMessage(&Message, 0, 0, 0);
 	if(msgRet > 0)
 	{
 	  TranslateMessage(&Message);
 	  DispatchMessage(&Message);
-	}
-	else if(msgRet == 0)
-	{
-	  break;
 	}
 	else
 	{
@@ -70,12 +71,13 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
     
     case WM_DESTROY:
     {
+      // This might be an error, maybe recreate window?
       OutputDebugStringA("Received WM_DESTROY Message\n");
     }break;
     
     case WM_CLOSE:
     {
-      PostQuitMessage(0);
+      IsRunning = false;
       OutputDebugStringA("Received WM_CLOSE Message\n");
     }break;
 
@@ -98,20 +100,11 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
       int y = Paint.rcPaint.top;
       int width = Paint.rcPaint.right - x;
       int height = Paint.rcPaint.bottom - y;
-      static DWORD Op = WHITENESS;
-      PatBlt(DeviceContextHandle, x, y, width, height, Op);
-      if(Op == WHITENESS)
-      {
-	Op = BLACKNESS;
-      }
-      else
-      {
-	Op = WHITENESS;
-      }
-
+      local_persist DWORD Op = WHITENESS;
+      PatBlt(DeviceContextHandle, x, y, width, height, WHITENESS);
       
       EndPaint(Window, &Paint);
-
+      
       OutputDebugStringA("Received WM_PAINT Message\n");
     }break;
 
