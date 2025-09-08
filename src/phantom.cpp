@@ -14,6 +14,9 @@
 LRESULT CALLBACK MainWindowCallback(HWND, UINT, WPARAM, LPARAM);
 void SetupMenu(HWND);
 void SetupControls(HWND);
+bool InitListViewColumns(HWND, char**, int);
+HWND CreateListView(HWND, int, int, int, int);
+
 
 /* Globals: */
 global_variable bool IsRunning;
@@ -85,14 +88,7 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
     }break;
     case WM_SIZE:
     {
-      RECT ClientRect;
-      GetClientRect(Window, &ClientRect);
-      int x = ClientRect.left;           
-      int y = ClientRect.top;            
-      int width = ClientRect.right - x;  
-      int height = ClientRect.bottom - y;
-      ResizeDIBSection(width, height);
-      
+
       OutputDebugStringA("Received WM_SIZE Message\n");
     }break;
     
@@ -173,7 +169,10 @@ void SetupControls(HWND WindowHandle)
 {
   HWND List1 = CreateListView(WindowHandle, 50, 50, 100, 100);
   HWND List2 = CreateListView(WindowHandle, 200, 200, 100, 100);
-  
+  char* cols1[] = {"name", "id"};
+  char* cols2[] = {"dogs", "cats"};
+  InitListViewColumns(List1, cols1, sizeof(cols1) / sizeof(cols1[0]));
+  InitListViewColumns(List2, cols2, sizeof(cols2) / sizeof(cols2[0]));
 }
 
 
@@ -191,7 +190,7 @@ HWND CreateListView(HWND parentHandle, int x, int y, int width, int height)
   GetClientRect(parentHandle, &clientRect);
 
   HWND listViewHandle = CreateWindowEx(0, WC_LISTVIEW, "",
-				       WS_CHILD | LVS_REPORT | LVS_EDITLABEL,
+				       WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
 				       x, y, width, height,
 				       parentHandle, 0, MainProgramInstance, 0);
 
@@ -199,7 +198,24 @@ HWND CreateListView(HWND parentHandle, int x, int y, int width, int height)
 				     
 }
 
-bool InitListViewColumns(HWND listViewHandle, char** columns)
+// char* cols[] = {"col1", "col2", "col3" }'
+// InitListViewColumns(ListView, cols, sizeof(cols)/sizeof(cols[0]);
+bool InitListViewColumns(HWND listViewHandle, char** columns, int columnCount)
 {
+  LVCOLUMN lvc;
+  lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
 
+  for(int i = 0; i < columnCount; i++) // TODO: columns undefined
+  {
+    lvc.iSubItem = i;
+    lvc.pszText = columns[i]; // TODO: currentText undefined
+    lvc.cx = 100; // TODO: move width somewhere else
+
+    lvc.fmt = (i < 2) ? LVCFMT_LEFT : LVCFMT_RIGHT;
+    if(ListView_InsertColumn(listViewHandle , i, &lvc) == -1)
+    {
+      return false;
+    }
+  }
+  return true;
 }

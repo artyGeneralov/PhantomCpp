@@ -8,6 +8,6 @@ the C++ route to see if I can make the whole thing without it being unnecessaril
 
 ## Build:
 ```
-cl -Zi ..\src\phantom.cpp user32.lib Gdi32.lib
+cl -Zi ..\src\phantom.cpp user32.lib Gdi32.lib Comctl32.lib
 ```
 This will be updated as we go.
