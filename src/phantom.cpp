@@ -1,18 +1,28 @@
 #include <windows.h>
-#include <CommCtrl.h>
-#define FILE_MENU_CLOSE 0
+#include <commctrl.h>
+
+/* Useful definitions: */
+
 
 #define local_persist static
 #define global_variable static
 
+/* Menu Items */
+#define FILE_MENU_CLOSE 101
+
+/* Function Prototypes: */
 LRESULT CALLBACK MainWindowCallback(HWND, UINT, WPARAM, LPARAM);
 void SetupMenu(HWND);
 void SetupControls(HWND);
+
+/* Globals: */
 global_variable bool IsRunning;
 global_variable HMENU Menu;
-
+global_variable HINSTANCE MainProgramInstance;
 int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
 {
+  MainProgramInstance = Instance;
+  
   WNDCLASSEX WindowClass = {};
   WindowClass.cbSize = sizeof(WNDCLASSEX);
   WindowClass.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
@@ -22,7 +32,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
   WindowClass.lpszClassName = "PhantomWindowClass";
   if(RegisterClassEx(&WindowClass))
   {
-
+    
     HWND WindowHandle = CreateWindowEx(0, WindowClass.lpszClassName, "MainWindow",
 				       WS_OVERLAPPEDWINDOW|WS_VISIBLE, CW_USEDEFAULT,
 				       CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0,
@@ -59,7 +69,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
   }
     
 
-return(0);
+  return(0);
 }
 
 
@@ -75,6 +85,14 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
     }break;
     case WM_SIZE:
     {
+      RECT ClientRect;
+      GetClientRect(Window, &ClientRect);
+      int x = ClientRect.left;           
+      int y = ClientRect.top;            
+      int width = ClientRect.right - x;  
+      int height = ClientRect.bottom - y;
+      ResizeDIBSection(width, height);
+      
       OutputDebugStringA("Received WM_SIZE Message\n");
     }break;
     
@@ -116,12 +134,6 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
       PAINTSTRUCT Paint;
       HDC DeviceContextHandle = BeginPaint(Window, &Paint); //The paint struct is filled for us (out from windows)
 
-      int x = Paint.rcPaint.left;
-      int y = Paint.rcPaint.top;
-      int width = Paint.rcPaint.right - x;
-      int height = Paint.rcPaint.bottom - y;
-      local_persist DWORD Op = WHITENESS;
-      PatBlt(DeviceContextHandle, x, y, width, height, WHITENESS);
       
       EndPaint(Window, &Paint);
       
@@ -159,6 +171,35 @@ void SetupMenu(HWND WindowHandle)
 
 void SetupControls(HWND WindowHandle)
 {
-  HWND ListViewHandle =  CreateWindowEx(0, WC_LISTVIEW, "Some static text", SS_CENTER|WS_CHILD|WS_VISIBLE, 0, 0, 200, 200, WindowHandle, 0, 0, 0 );
+  HWND List1 = CreateListView(WindowHandle, 50, 50, 100, 100);
+  HWND List2 = CreateListView(WindowHandle, 200, 200, 100, 100);
   
+}
+
+
+/* List-view functions: */
+
+HWND CreateListView(HWND parentHandle, int x, int y, int width, int height)
+{
+  INITCOMMONCONTROLSEX initCommonControls;
+  initCommonControls.dwSize = sizeof(initCommonControls);
+  initCommonControls.dwICC = ICC_LISTVIEW_CLASSES|ICC_STANDARD_CLASSES;
+  InitCommonControlsEx(&initCommonControls);
+
+
+  RECT clientRect;
+  GetClientRect(parentHandle, &clientRect);
+
+  HWND listViewHandle = CreateWindowEx(0, WC_LISTVIEW, "",
+				       WS_CHILD | LVS_REPORT | LVS_EDITLABEL,
+				       x, y, width, height,
+				       parentHandle, 0, MainProgramInstance, 0);
+
+  return(listViewHandle);
+				     
+}
+
+bool InitListViewColumns(HWND listViewHandle, char** columns)
+{
+
 }

@@ -1,3 +1,6 @@
 *.bat
 *~
 /build
+/draft
+/misc
+*#*
