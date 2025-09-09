@@ -7,6 +7,6 @@ to see if I can make the whole thing without it being unnecessarily slow and blo
 
 ## Build:
 ```
-cl -Zi ..\src\phantom.cpp user32.lib Gdi32.lib Comctl32.lib
+cl ..\src\phantom.cpp user32.lib Gdi32.lib Comctl32.lib
 ```
 This will be updated as we go.
