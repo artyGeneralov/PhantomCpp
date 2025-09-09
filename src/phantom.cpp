@@ -1,35 +1,31 @@
 #include <windows.h>
 #include <commctrl.h>
+#include "arena.cpp"
+
 
 /* Useful definitions: */
 
 
 #define local_persist static
 #define global_variable static
-#define ListView HWND
+
 
 /* Menu Items */
 #define FILE_MENU_CLOSE 101
 
 
-/* Unique IDs: */
-#define LST_PROCS_ID 1001
-#define LST_LIBS_ID 1002
 
 /* Function Prototypes: */
 LRESULT CALLBACK MainWindowCallback(HWND, UINT, WPARAM, LPARAM);
 void SetupMenu(HWND);
 void SetupControls(HWND);
-bool InitListViewColumns(ListView, char**, int);
-ListView CreateListView(HWND, int, int, int, int, int);
-bool InsertListViewItems(ListView, int);
 
 /* Globals: */
 global_variable bool IsRunning;
 global_variable HMENU Menu;
 global_variable HINSTANCE MainProgramInstance;
 
-
+#include "listViewHelper.cpp"
 
 /* TODO: List Testing, temporary! */
 #define MAX_ROWS 1024
@@ -226,6 +222,7 @@ void SetupControls(HWND WindowHandle)
   // TODO: this is all temporary
   ListView List1 = CreateListView(WindowHandle, LST_PROCS_ID, 50, 50, 400, 400);
   ListView List2 = CreateListView(WindowHandle, LST_LIBS_ID, 50, 500, 400, 400);
+  ListView_SetExtendedListViewStyleEx(List1, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);
   char* cols1[] = {"name", "id"};
   char* cols2[] = {"dogs", "cats"};
   InitListViewColumns(List1, cols1, sizeof(cols1) / sizeof(cols1[0]));
@@ -234,63 +231,4 @@ void SetupControls(HWND WindowHandle)
 }
 
 
-/* List-view functions: */
-
-HWND CreateListView(HWND parentHandle, int uniqueID, int x, int y, int width, int height)
-{
-  RECT clientRect;
-  GetClientRect(parentHandle, &clientRect);
-
-  ListView listViewHandle = CreateWindowEx(0, WC_LISTVIEW, "",
-				       WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS,
-				       x, y, width, height,
-				       parentHandle, (HMENU)uniqueID, MainProgramInstance, 0);
-
-  return(listViewHandle);
-				     
-}
-
-/* works with the input:
-  char* cols[] = {"col1", "col2", "col3" }'
-   InitListViewColumns(ListView, cols, sizeof(cols)/sizeof(cols[0]); */
-bool InitListViewColumns(ListView listViewHandle, char** columns, int columnCount)
-{
-  LVCOLUMN lvc;
-  lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
-
-  for(int i = 0; i < columnCount; i++)
-  {
-    lvc.iSubItem = i;
-    lvc.pszText = columns[i];
-    lvc.cx = 100; // TODO: move width somewhere else
-
-    lvc.fmt = (i < 2) ? LVCFMT_LEFT : LVCFMT_RIGHT;
-    if(ListView_InsertColumn(listViewHandle , i, &lvc) == -1)
-    {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool InsertListViewItems(ListView ListViewHandle, int items_amount)
-{
-  LVITEM lvItem;
-  
-  lvItem.mask = LVIF_TEXT | LVIF_PARAM;
-  lvItem.pszText = LPSTR_TEXTCALLBACK;
-  lvItem.iSubItem = 0;
-
-  for(int i = 0; i < items_amount; i++)
-  {
-    lvItem.lParam = i;
-    lvItem.iItem = i;
-    
-
-    if(ListView_InsertItem(ListViewHandle, &lvItem) == -1)
-    {
-      return false;
-    }
-  }
-  return true;
-}
+/**/
