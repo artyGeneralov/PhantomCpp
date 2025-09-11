@@ -10,6 +10,9 @@
 #define ListView HWND
 #define Button HWND
 
+/* Global Values */
+#define MAX_PROCESSES 256
+
 /* Menu Items */
 #define FILE_MENU_CLOSE 101
 
@@ -132,7 +135,7 @@ typedef struct
   size_t Count, Cap;
 } ProcessModel;
 
-global_variable Arena MainArena = ArenaCreate(1024); // an arena that holds the POINTERS to 
+global_variable Arena MainArena = ArenaCreate(4 * 1024); // an arena that holds the POINTERS to 
 global_variable ProcessModel Model;
 
 void DecideOnProcess(ProcessInfo* p)
@@ -147,24 +150,20 @@ void DecideOnProcess(ProcessInfo* p)
     return;
   }
 
+
+  // allocate a pointer on the arena this pointer should point to p
   ProcessInfo* saved = (ProcessInfo*) ArenaAlloc(&MainArena, sizeof(*saved), 1);
+  if(!saved)
+  {
+    return;
+  }
   *saved = *p;
-  
-  // save the process pointer in persistent memory (array? arena?) needs to be accessed by the UI.
-  ProcessInfo** newArr = (ProcessInfo**)  ArenaAlloc(&MainArena, sizeof(*newArr), 1);
-  if (Model.By_index && Model.Count > 0) {
-        memcpy(newArr, Model.By_index, Model.Count * sizeof(*newArr));
-    }
-
-  newArr[Model.Count] = saved;
-
-	 Model.By_index = newArr;
-	 Model.Count++;
-  Model.By_index = newArr;
-  
-
+  if (Model.Count < Model.Cap)
+  {
+    Model.By_index[Model.Count++] = saved;
   // In the end, send an LVN_GETDISPINFO message
-  LV_SetItemCount(List1, Model.Count);
+    LV_SetItemCount(List1, Model.Count);
+  }
   
 }
 
@@ -174,7 +173,7 @@ void ProcessExited()
 {
   // the process that exited
   ProcessInfo p = {0};
-  p.PID = 1;
+  p.PID = Model.Count;
   p.CreationTime = 10;
   p.ImagePath = "my/path/name";
   p.ProcessName = "name";
@@ -184,6 +183,13 @@ void ProcessExited()
   
 }
 
+void InitModel()
+{
+  Model.By_index = (ProcessInfo**)ArenaAlloc(&MainArena, MAX_PROCESSES * sizeof(ProcessInfo*), 1);
+  Model.Count = 0;
+  Model.Cap = MAX_PROCESSES;
+}
+
 
 
 
@@ -191,7 +197,7 @@ void ProcessExited()
 
 int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
 {
-  
+  InitModel();
   MainProgramInstance = Instance;
   
   INITCOMMONCONTROLSEX initCommonControls;
