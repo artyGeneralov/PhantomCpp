@@ -1,52 +1,197 @@
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commctrl.h>
-#include "arena.cpp"
-
 
 /* Useful definitions: */
 
 
 #define local_persist static
 #define global_variable static
-
+#define ListView HWND
+#define Button HWND
 
 /* Menu Items */
 #define FILE_MENU_CLOSE 101
 
 
+/* Unique IDs: */
+#define LST_PROCS_ID 1001
+#define LST_LIBS_ID 1002
+#define BTN_START_ID 2001
 
 /* Function Prototypes: */
 LRESULT CALLBACK MainWindowCallback(HWND, UINT, WPARAM, LPARAM);
 void SetupMenu(HWND);
 void SetupControls(HWND);
+bool LV_InitColumns(ListView, char**, int);
+ListView LV_Create(HWND, int, int, int, int, int);
+void LV_SetItemCount(ListView, int);
+HWND CreateButton(HWND, int, int, int, int, int);
 
 /* Globals: */
 global_variable bool IsRunning;
 global_variable HMENU Menu;
 global_variable HINSTANCE MainProgramInstance;
+global_variable ListView List1;
+global_variable ListView List2;
 
-#include "listViewHelper.cpp"
 
-/* TODO: List Testing, temporary! */
-#define MAX_ROWS 1024
-#define NAME_MAX 64
+/* Arena: */
 
-typedef struct ROW {
-  char name[NAME_MAX];
-  int id;
-} ROW;
+typedef struct
+{
+  unsigned char* base;
+  size_t used;
+  size_t capacity;
+}Arena;
 
-ROW gRows[MAX_ROWS] = {
-  {"Mike",   10},
-  {"Jade",   24},
-  {"Daniel", 16}
-};
-int gRowCount = 3;
+size_t RoundUp(size_t x, size_t a)
+{
+  return ((x + (a-1)) & ~(a-1));
+}
+
+Arena ArenaCreate (size_t capacity)
+{
+  Arena a = {0};
+  void* p = VirtualAlloc(0, capacity, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  if(p)
+  {
+    a.base = (unsigned char*)p;
+    a.capacity = capacity;
+    a.used = 0;
+  }
+  return a;
+}
+
+void ArenaRelease(Arena* a)
+{
+  if(a->base)
+  {
+    VirtualFree(a->base, 0, MEM_RELEASE);
+  }
+  a->base = 0;
+  a->used = 0;
+  a->capacity = 0;
+}
+
+void* ArenaAlloc(Arena* a, size_t n, size_t align)
+{
+  size_t p = RoundUp(a->used, align);
+  if(p + n > a->capacity)
+  {
+    return 0;
+  }
+  void* result = a->base + p;
+  a->used = p + n;
+  return result;
+}
+
+void ArenaReset(Arena* a)
+{
+  a->used = 0;
+}
+
+
+/* Process Data structures testing first iteration:  */
+
+typedef struct
+{
+  char* Name;
+  char* Path;
+  int next_free;
+} LibraryInfo;
+
+typedef struct
+{
+  char* Type;
+  char* Name;
+  int next_free;
+} HandleInfo;
+
+typedef struct
+{
+  unsigned int PID;
+  unsigned long long CreationTime;
+  char* ImagePath;
+  char* ProcessName;
+
+  Arena Slab;
+  
+  LibraryInfo* Dlls;
+  size_t Dll_count, Dll_cap;
+  int Dll_free_head;
+
+  HandleInfo* Handles;
+  size_t Handle_count, Handle_cap;
+  int Handle_free_head;
+} ProcessInfo;
+
+typedef struct
+{
+  ProcessInfo** By_index;
+  size_t Count, Cap;
+} ProcessModel;
+
+global_variable Arena MainArena = ArenaCreate(1024); // an arena that holds the POINTERS to 
+global_variable ProcessModel Model;
+
+void DecideOnProcess(ProcessInfo* p)
+{
+  unsigned long long currentTime = 15;
+  unsigned long long Interval = 10;
+  //This process would have a creation time...?
+  if(currentTime - p->CreationTime > Interval)
+  {
+    // a. Remove from ProcessModel.by_index (TODO)
+    // b. ArenaRelease(&p->slab); free(p);
+    return;
+  }
+
+  ProcessInfo* saved = (ProcessInfo*) ArenaAlloc(&MainArena, sizeof(*saved), 1);
+  *saved = *p;
+  
+  // save the process pointer in persistent memory (array? arena?) needs to be accessed by the UI.
+  ProcessInfo** newArr = (ProcessInfo**)  ArenaAlloc(&MainArena, sizeof(*newArr), 1);
+  if (Model.By_index && Model.Count > 0) {
+        memcpy(newArr, Model.By_index, Model.Count * sizeof(*newArr));
+    }
+
+  newArr[Model.Count] = saved;
+
+	 Model.By_index = newArr;
+	 Model.Count++;
+  Model.By_index = newArr;
+  
+
+  // In the end, send an LVN_GETDISPINFO message
+  LV_SetItemCount(List1, Model.Count);
+  
+}
+
+
+
+void ProcessExited()
+{
+  // the process that exited
+  ProcessInfo p = {0};
+  p.PID = 1;
+  p.CreationTime = 10;
+  p.ImagePath = "my/path/name";
+  p.ProcessName = "name";
+  p.Slab = ArenaCreate(1024);
+
+  DecideOnProcess(&p);
+  
+}
+
+
+
 
 /* Program start: */
 
 int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
 {
+  
   MainProgramInstance = Instance;
   
   INITCOMMONCONTROLSEX initCommonControls;
@@ -61,6 +206,9 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLi
   WindowClass.hInstance = Instance;
   //  WindowClass.hIcon = ;
   WindowClass.lpszClassName = "PhantomWindowClass";
+
+
+    
   if(RegisterClassEx(&WindowClass))
   {
     
@@ -150,6 +298,11 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
 	{
 	  IsRunning = false;
 	}break;
+	
+	case BTN_START_ID:
+	{
+	  ProcessExited();
+	}break;
       }
     }break;
 
@@ -173,15 +326,22 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
 	int row = di->item.iItem;
 	int col = di->item.iSubItem;
 
-	if(col == 0)
-	{
-	  di->item.pszText = gRows[row].name;
-	}
-	else if(col == 1)
-	{
-	  wsprintfA(di->item.pszText, "%d", gRows[row].id);
-	  
-	}
+	if (row < 0 || (size_t)row >= Model.Count) break;
+        ProcessInfo* p = Model.By_index[row];
+
+        local_persist char buf[512];
+
+        if (col == 0) {
+            wsprintfA(buf, "%u", p->PID);
+        } else if (col == 1) {
+            lstrcpynA(buf, p->ImagePath ? p->ImagePath : "", sizeof(buf));
+        } else if (col == 2) {
+            lstrcpynA(buf, p->ProcessName ? p->ProcessName : "", sizeof(buf));
+        } else {
+            buf[0] = '\0';
+        }
+
+        di->item.pszText = buf;
       }
       else if(hdr->idFrom == LST_LIBS_ID)
       {
@@ -217,18 +377,72 @@ void SetupMenu(HWND WindowHandle)
   SetMenu(WindowHandle, Menu);
 }
 
+
 void SetupControls(HWND WindowHandle)
 {
   // TODO: this is all temporary
-  ListView List1 = CreateListView(WindowHandle, LST_PROCS_ID, 50, 50, 400, 400);
-  ListView List2 = CreateListView(WindowHandle, LST_LIBS_ID, 50, 500, 400, 400);
+  List1 = LV_Create(WindowHandle, LST_PROCS_ID, 50, 50, 400, 400);
+  List2 = LV_Create(WindowHandle, LST_LIBS_ID, 50, 500, 400, 400);
   ListView_SetExtendedListViewStyleEx(List1, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);
-  char* cols1[] = {"name", "id"};
+  char* cols1[] = {"PID", "Path", "Name"};
   char* cols2[] = {"dogs", "cats"};
-  InitListViewColumns(List1, cols1, sizeof(cols1) / sizeof(cols1[0]));
-  InitListViewColumns(List2, cols2, sizeof(cols2) / sizeof(cols2[0]));
-  InsertListViewItems(List1, gRowCount);
+  LV_InitColumns(List1, cols1, sizeof(cols1) / sizeof(cols1[0]));
+  LV_InitColumns(List2, cols2, sizeof(cols2) / sizeof(cols2[0]));
+  Button btnStart = CreateButton(WindowHandle, BTN_START_ID, 500, 50, 100, 40);
+ 
+}
+
+HWND CreateButton(HWND parentHandle, int uniqueID, int x, int y, int width, int height)
+{
+  Button btnHandle = CreateWindowEx(0, "BUTTON", "Start",
+				    WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+				    x, y, width, height,
+				    parentHandle, (HMENU)uniqueID, MainProgramInstance, 0);
+  return(btnHandle);
+}
+
+/* List-view functions: */
+
+HWND LV_Create(HWND parentHandle, int uniqueID, int x, int y, int width, int height)
+{
+  /*  RECT clientRect;
+  GetClientRect(parentHandle, &clientRect);
+  */
+  ListView listViewHandle = CreateWindowEx(0, WC_LISTVIEW, "",
+					   WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS | LVS_OWNERDATA,
+					   x, y, width, height,
+					   parentHandle, (HMENU)uniqueID, MainProgramInstance, 0);
+
+  return(listViewHandle);
+				     
+}
+
+/* works with the input:
+   char* cols[] = {"col1", "col2", "col3" }'
+   LV_InitColumns(ListView, cols, sizeof(cols)/sizeof(cols[0]); */
+bool LV_InitColumns(ListView listViewHandle, char** columns, int columnCount)
+{
+  LVCOLUMN lvc;
+  lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
+
+  for(int i = 0; i < columnCount; i++)
+  {
+    lvc.iSubItem = i;
+    lvc.pszText = columns[i];
+    lvc.cx = 100; // TODO: move width somewhere else
+
+    lvc.fmt = (i < 2) ? LVCFMT_LEFT : LVCFMT_RIGHT;
+    if(ListView_InsertColumn(listViewHandle , i, &lvc) == -1)
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+void LV_SetItemCount(ListView ListViewHandle, int items_amount)
+{
+  ListView_SetItemCountEx(ListViewHandle, items_amount, 0);
 }
 
 
-/**/
