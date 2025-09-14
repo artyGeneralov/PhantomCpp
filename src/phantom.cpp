@@ -40,59 +40,75 @@ global_variable ListView List2;
 
 
 /* Arena: */
+#define ARENA_MAX_CAPACITY 4*1024*1024*1024
+global_variable size_t PAGE_SIZE = 4096;
 
 typedef struct
 {
   unsigned char* base;
-  size_t used;
   size_t capacity;
-}Arena;
+  size_t used;
+} Arena;
 
-size_t RoundUp(size_t x, size_t a)
+size_t RoundUp(size_t a, size_t b)
 {
-  return ((x + (a-1)) & ~(a-1));
+  return ((a + (b-1)) & ~(b-1));
 }
 
-Arena ArenaCreate (size_t capacity)
+Arena ArenaCreate(size_t requiredBytes)
 {
   Arena a = {0};
-  void* p = VirtualAlloc(0, capacity, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-  if(p)
+  if(requiredBytes > ARENA_MAX_CAPACITY)
   {
-    a.base = (unsigned char*)p;
-    a.capacity = capacity;
-    a.used = 0;
+    return a;
   }
+  void* arenaBase = VirtualAlloc(0, requiredBytes, MEM_RESERVE, PAGE_READWRITE);
+  a.base =(unsigned char*) arenaBase;
+  a.capacity = requiredBytes;
+  a.used = 0;
+
   return a;
 }
 
-void ArenaRelease(Arena* a)
+int ArenaEnsureCommitted(Arena* arena, size_t new_used)
 {
-  if(a->base)
+  size_t already_commited = RoundUp(arena->used, PAGE_SIZE);
+  size_t required = RoundUp(new_used, PAGE_SIZE);
+
+  if(required > already_commited)
   {
-    VirtualFree(a->base, 0, MEM_RELEASE);
+    size_t toCommit = required - already_commited;
+    void* p = VirtualAlloc(arena->base + already_commited, toCommit, MEM_COMMIT, PAGE_READWRITE);
+    if(!p)
+    {
+      return(0);
+    }
   }
-  a->base = 0;
-  a->used = 0;
-  a->capacity = 0;
+  return(1);
+  
 }
 
-void* ArenaAlloc(Arena* a, size_t n, size_t align)
+void* ArenaAlloc(Arena* arena, size_t bytes_to_alloc, size_t align)
 {
-  size_t p = RoundUp(a->used, align);
-  if(p + n > a->capacity)
+  size_t currentAligned = RoundUp(arena->used, align);
+  size_t new_used = currentAligned + bytes_to_alloc;
+
+  if(new_used > arena->capacity)
   {
-    return 0;
+    return(0);
   }
-  void* result = a->base + p;
-  a->used = p + n;
-  return result;
+  if(ArenaEnsureCommitted(arena, new_used) == 0)
+  {
+    return(0);
+  }
+
+  void* out = arena->base + currentAligned;
+  arena->used = new_used;
+  return out;
 }
 
-void ArenaReset(Arena* a)
-{
-  a->used = 0;
-}
+
+
 
 
 /* Process Data structures testing first iteration:  */
@@ -370,12 +386,12 @@ void SetupMenu(HWND WindowHandle)
 
   // File Menu
   HMENU FileMenu = CreateMenu();
-  AppendMenu(FileMenu, MF_STRING, FILE_MENU_CLOSE, "Close");
+  AppendMenu(FileMenu, MF_STRING,(UINT_PTR) FILE_MENU_CLOSE, "Close");
 
 
   // Help Menu
   HMENU HelpMenu = CreateMenu();
-  AppendMenu(HelpMenu, MF_STRING, 1, "About");
+  AppendMenu(HelpMenu, MF_STRING, (UINT_PTR) 1, "About");
   
   // Main Menu
   AppendMenu(Menu, MF_POPUP,(UINT_PTR)FileMenu, "File");
@@ -403,7 +419,7 @@ HWND CreateButton(HWND parentHandle, int uniqueID, int x, int y, int width, int 
   Button btnHandle = CreateWindowEx(0, "BUTTON", "Start",
 				    WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
 				    x, y, width, height,
-				    parentHandle, (HMENU)uniqueID, MainProgramInstance, 0);
+				    parentHandle, (HMENU)(UINT_PTR)uniqueID, MainProgramInstance, 0);
   return(btnHandle);
 }
 
@@ -417,7 +433,7 @@ HWND LV_Create(HWND parentHandle, int uniqueID, int x, int y, int width, int hei
   ListView listViewHandle = CreateWindowEx(0, WC_LISTVIEW, "",
 					   WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_EDITLABELS | LVS_OWNERDATA,
 					   x, y, width, height,
-					   parentHandle, (HMENU)uniqueID, MainProgramInstance, 0);
+					   parentHandle, (HMENU)(UINT_PTR)uniqueID, MainProgramInstance, 0);
 
   return(listViewHandle);
 				     
