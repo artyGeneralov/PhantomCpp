@@ -11,7 +11,7 @@
 #define Button HWND
 
 /* Global Values */
-#define MAX_PROCESSES 256
+
 
 /* Menu Items */
 #define FILE_MENU_CLOSE 101
@@ -35,12 +35,19 @@ HWND CreateButton(HWND, int, int, int, int, int);
 global_variable bool IsRunning;
 global_variable HMENU Menu;
 global_variable HINSTANCE MainProgramInstance;
-global_variable ListView List1;
+global_variable ListView ListProcesses;
 global_variable ListView List2;
 
 
+
+
 /* Arena: */
-#define ARENA_MAX_CAPACITY 4*1024*1024*1024
+#define ARENA_MAX_CAPACITY (4ULL*1024ULL*1024ULL*1024ULL)
+
+#define ARENA_PUSH_STRUCT(arena, Type) \
+  ((Type*) SecureZeroMemory(ArenaAlloc(arena, sizeof(Type), _alignof(Type)), sizeof(Type)))
+
+
 global_variable size_t PAGE_SIZE = 4096;
 
 typedef struct
@@ -50,10 +57,17 @@ typedef struct
   size_t used;
 } Arena;
 
-size_t RoundUp(size_t a, size_t b)
-{
-  return ((a + (b-1)) & ~(b-1));
-}
+// Prototypes:
+size_t RoundUp(size_t a, size_t b);
+DWORD ArenaPtrToOffset(const Arena*, const void*);
+void* ArenaOffsetToPtr(const Arena*, const DWORD);
+Arena ArenaCreate(size_t);
+void ArenaFree(Arena*);
+void ArenaReset(Arena*);
+void* ArenaAlloc(Arena*, size_t, size_t);
+int ArenaEnsureCommitted(Arena*, size_t);
+
+
 
 Arena ArenaCreate(size_t requiredBytes)
 {
@@ -107,105 +121,166 @@ void* ArenaAlloc(Arena* arena, size_t bytes_to_alloc, size_t align)
   return out;
 }
 
+void ArenaReset(Arena* arena)
+{
+  arena->used = 0;
+}
+
+void ArenaFree(Arena* arena)
+{
+  if(arena->base)
+  {
+    VirtualFree(arena->base, 0, MEM_RELEASE);
+  }
+  arena->base = 0;
+  arena->used = 0;
+  arena->capacity = 0;
+}
+
+// TODO: see if the check for empty script is needed?
+
+char* ArenaPushString(Arena* arena, const char* s)
+{
+  if(!s)
+  {
+    return(0);
+  }
+  int length = lstrlenA(s) + 1;
+  char* p = (char*) ArenaAlloc(arena, length, 1);
+
+  CopyMemory(p, s, length);
+  return p;
+}
+
+
+// Helpers:
+size_t RoundUp(size_t a, size_t b)
+{
+  return ((a + (b-1)) & ~(b-1));
+}
+
+DWORD ArenaPtrToOffset(const Arena* arena, const void* p)
+{
+    if (!p) return 0;
+    uintptr_t diff = (uintptr_t)p - (uintptr_t)arena->base;
+    return (DWORD)diff;
+}
+
+void* ArenaOffsetToPtr(const Arena* arena, const DWORD off)
+{
+  void* p = (void*)((unsigned char*)(arena->base + off));
+  return p;
+  //return off ? (void*)((unsigned char*)arena->base + off) : NULL;
+}
 
 
 
 
-/* Process Data structures testing first iteration:  */
 
+/* Process Data structures testing second iteration:  */
+// TODO: reminder: strings end with \0. thus - when pushing a string into the arena, must account for this.
 typedef struct
 {
-  char* Name;
-  char* Path;
-  int next_free;
-} LibraryInfo;
-
-typedef struct
-{
-  char* Type;
-  char* Name;
-  int next_free;
-} HandleInfo;
-
-typedef struct
-{
-  unsigned int PID;
-  unsigned long long CreationTime;
-  char* ImagePath;
-  char* ProcessName;
-
-  Arena Slab;
+  DWORD process_name_offset;
   
-  LibraryInfo* Dlls;
-  size_t Dll_count, Dll_cap;
-  int Dll_free_head;
+  DWORD libs_head_offset;
+  DWORD libs_tail_offset;
+  DWORD libs_count;
 
-  HandleInfo* Handles;
-  size_t Handle_count, Handle_cap;
-  int Handle_free_head;
+  DWORD handles_head;
+  DWORD handles_tail;
+  DWORD handles_count;
+  
 } ProcessInfo;
 
 typedef struct
 {
-  ProcessInfo** By_index;
-  size_t Count, Cap;
-} ProcessModel;
+  DWORD next_offset;
+  DWORD name_offset;
+} LibInfo;
 
-global_variable Arena MainArena = ArenaCreate(4 * 1024); // an arena that holds the POINTERS to 
-global_variable ProcessModel Model;
+typedef struct
+{
+  DWORD next_offset;
+  DWORD name_offset;
+} HandleInfo;
+
+typedef struct
+{
+  DWORD pid;
+  Arena processArena;
+  DWORD procInfoOffset; // TODO: This is probably 0
+} ProcessEntry;
+
+#define MAX_PROCESSES 1000
+global_variable ProcessEntry ProcessEntries[MAX_PROCESSES];
+global_variable unsigned int ProcessEntriesCount = 0;
 
 void DecideOnProcess(ProcessInfo* p)
 {
-  unsigned long long currentTime = 15;
-  unsigned long long Interval = 10;
-  //This process would have a creation time...?
-  if(currentTime - p->CreationTime > Interval)
+  //TODO: Temporary!!
+  for(int i = 0; i < MAX_PROCESSES; i++)
   {
-    // a. Remove from ProcessModel.by_index (TODO)
-    // b. ArenaRelease(&p->slab); free(p);
-    return;
+    
   }
-
-
-  // allocate a pointer on the arena this pointer should point to p
-  ProcessInfo* saved = (ProcessInfo*) ArenaAlloc(&MainArena, sizeof(*saved), 1);
-  if(!saved)
-  {
-    return;
-  }
-  *saved = *p;
-  if (Model.Count < Model.Cap)
-  {
-    Model.By_index[Model.Count++] = saved;
-  // In the end, send an LVN_GETDISPINFO message
-    LV_SetItemCount(List1, Model.Count);
-  }
-  
 }
 
 
 
 void ProcessExited()
 {
-  // the process that exited
-  ProcessInfo p = {0};
-  p.PID = Model.Count;
-  p.CreationTime = 10;
-  p.ImagePath = "my/path/name";
-  p.ProcessName = "name";
-  p.Slab = ArenaCreate(1024);
-
-  DecideOnProcess(&p);
   
 }
 
-void InitModel()
+void ProcessCreated()
 {
-  Model.By_index = (ProcessInfo**)ArenaAlloc(&MainArena, MAX_PROCESSES * sizeof(ProcessInfo*), 1);
-  Model.Count = 0;
-  Model.Cap = MAX_PROCESSES;
-}
+  // TODO: mockup process + lib + handle for it (lib+handle would come from LibCreated() and HandleCreated())
+  char processName[] = "myProc";
+  int pid = 123;
 
+  char libName[] = "myLib.dll";
+  char handleName[] = "myHandle";
+
+
+  // TODO: move to function (CreateProcessSnapshot())
+  
+  /* An array of up to 1000 processes -
+     [ [pid, ptr_to_arena, OffsetOfProcessInfo (0)] , [pid, ptr_to_arena, 0] , .... ]
+     ptr_to_arena points to an arena that has:
+     [ [ProcessInfo], [strings/libs/handles], ... ]
+     
+     so we must:
+     - Allocate the arena for processEntry ( ptr_to_arena should point to an actual arena, allocated with VirtualAlloc by CreateArena)
+     - create the ProcessInfo ( Process info holds offsets for the arena that the entry is pointing to. The processInfo lives ON that same arena )
+     - push ProcessInfo the entries arena.
+     - mockup: - create the LibInfo
+               - push it to the same arena
+	       - update the LibInfo's values
+	       - update the ProcessInfo values
+     - set the global array of entries to point at the next entry
+     - send a message to the list ( LV_SetItemCount )
+     
+
+   */
+  ProcessEntry entry = {0};
+  entry.processArena = ArenaCreate(ARENA_MAX_CAPACITY);
+  entry.pid = pid;
+  
+  ProcessInfo myProcInfo = {0};
+  
+  ProcessInfo* procInfoPtr =(ProcessInfo*)ARENA_PUSH_STRUCT(&(entry.processArena), ProcessInfo);
+  char* procNamePtr = (char*) ArenaPushString(&(entry.processArena), processName);
+  procInfoPtr->process_name_offset = ArenaPtrToOffset(&(entry.processArena), procNamePtr);
+
+  ProcessEntries[ProcessEntriesCount++] = entry;
+  
+  // Libraries Mockup:
+  LibInfo libInfo = {0};
+  char* libNamePtr = (char*) ArenaPushString(&(entry.processArena), libName);
+  libInfo.name_offset = ArenaPtrToOffset(&(entry.processArena), libNamePtr);
+
+  LV_SetItemCount(ListProcesses, ProcessEntriesCount);
+}
 
 
 
@@ -213,7 +288,6 @@ void InitModel()
 
 int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CommandLine, int ShowCode)
 {
-  InitModel();
   MainProgramInstance = Instance;
   
   INITCOMMONCONTROLSEX initCommonControls;
@@ -323,7 +397,8 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
 	
 	case BTN_START_ID:
 	{
-	  ProcessExited();
+	  // TODO: un-implemented button functionality
+	  ProcessCreated();
 	}break;
       }
     }break;
@@ -345,9 +420,27 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
       if(hdr->idFrom == LST_PROCS_ID && hdr->code == LVN_GETDISPINFO)
       {
 	NMLVDISPINFO* di = (NMLVDISPINFO*)LParam;
+	
 	int row = di->item.iItem;
 	int col = di->item.iSubItem;
-
+	ProcessEntry entry = ProcessEntries[row];
+	if(row < 0) break; // TODO: see if this happens?
+	local_persist char buf[512]; // TODO: buffer can overflow, solve this.
+	ProcessInfo* p = (ProcessInfo*)ArenaOffsetToPtr(&entry.processArena, entry.procInfoOffset);
+	if(col == 0) // pid
+	{
+	  wsprintfA(buf, "%u", entry.pid);
+	} else if( col == 1 ) // name
+	{
+	  lstrcpynA(buf, (char*)ArenaOffsetToPtr(&entry.processArena, p->process_name_offset), sizeof(buf));
+	}
+	else
+	{
+	  buf[0] = '\0';
+	}
+	di->item.pszText = buf;
+	  
+	/*
 	if (row < 0 || (size_t)row >= Model.Count) break;
         ProcessInfo* p = Model.By_index[row];
 
@@ -363,7 +456,7 @@ LRESULT CALLBACK MainWindowCallback(HWND Window, UINT Message, WPARAM WParam, LP
             buf[0] = '\0';
         }
 
-        di->item.pszText = buf;
+        di->item.pszText = buf;*/
       }
       else if(hdr->idFrom == LST_LIBS_ID)
       {
@@ -403,12 +496,12 @@ void SetupMenu(HWND WindowHandle)
 void SetupControls(HWND WindowHandle)
 {
   // TODO: this is all temporary
-  List1 = LV_Create(WindowHandle, LST_PROCS_ID, 50, 50, 400, 400);
+  ListProcesses = LV_Create(WindowHandle, LST_PROCS_ID, 50, 50, 400, 400);
   List2 = LV_Create(WindowHandle, LST_LIBS_ID, 50, 500, 400, 400);
-  ListView_SetExtendedListViewStyleEx(List1, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);
-  char* cols1[] = {"PID", "Path", "Name"};
+  ListView_SetExtendedListViewStyleEx(ListProcesses, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);
+  char* cols1[] = {"PID", "Name"};
   char* cols2[] = {"dogs", "cats"};
-  LV_InitColumns(List1, cols1, sizeof(cols1) / sizeof(cols1[0]));
+  LV_InitColumns(ListProcesses, cols1, sizeof(cols1) / sizeof(cols1[0]));
   LV_InitColumns(List2, cols2, sizeof(cols2) / sizeof(cols2[0]));
   Button btnStart = CreateButton(WindowHandle, BTN_START_ID, 500, 50, 100, 40);
  
