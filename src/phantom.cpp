@@ -1,21 +1,13 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commctrl.h>
-
+#include "arena.cpp"
+#include "globals.hpp"
 /* Useful definitions: */
-
-
-#define local_persist static
-#define global_variable static
-#define ListView HWND
-#define Button HWND
-
-/* Global Values */
-
+// moved to globals.hpp
 
 /* Menu Items */
 #define FILE_MENU_CLOSE 101
-
 
 /* Unique IDs: */
 #define LST_PROCS_ID 1001
@@ -39,146 +31,12 @@ global_variable ListView ListProcesses;
 global_variable ListView List2;
 
 
-
-
-/* Arena: */
-#define ARENA_MAX_CAPACITY (4ULL*1024ULL*1024ULL*1024ULL)
-
-#define ARENA_PUSH_STRUCT(arena, Type) \
-  ((Type*) SecureZeroMemory(ArenaAlloc(arena, sizeof(Type), _alignof(Type)), sizeof(Type)))
-
-
-global_variable size_t PAGE_SIZE = 4096;
-
-typedef struct
-{
-  unsigned char* base;
-  size_t capacity;
-  size_t used;
-} Arena;
-
-// Prototypes:
-size_t RoundUp(size_t a, size_t b);
-DWORD ArenaPtrToOffset(const Arena*, const void*);
-void* ArenaOffsetToPtr(const Arena*, const DWORD);
-Arena ArenaCreate(size_t);
-void ArenaFree(Arena*);
-void ArenaReset(Arena*);
-void* ArenaAlloc(Arena*, size_t, size_t);
-int ArenaEnsureCommitted(Arena*, size_t);
-
-
-
-Arena ArenaCreate(size_t requiredBytes)
-{
-  Arena a = {0};
-  if(requiredBytes > ARENA_MAX_CAPACITY)
-  {
-    return a;
-  }
-  void* arenaBase = VirtualAlloc(0, requiredBytes, MEM_RESERVE, PAGE_READWRITE);
-  a.base =(unsigned char*) arenaBase;
-  a.capacity = requiredBytes;
-  a.used = 0;
-
-  return a;
-}
-
-int ArenaEnsureCommitted(Arena* arena, size_t new_used)
-{
-  size_t already_commited = RoundUp(arena->used, PAGE_SIZE);
-  size_t required = RoundUp(new_used, PAGE_SIZE);
-
-  if(required > already_commited)
-  {
-    size_t toCommit = required - already_commited;
-    void* p = VirtualAlloc(arena->base + already_commited, toCommit, MEM_COMMIT, PAGE_READWRITE);
-    if(!p)
-    {
-      return(0);
-    }
-  }
-  return(1);
-  
-}
-
-void* ArenaAlloc(Arena* arena, size_t bytes_to_alloc, size_t align)
-{
-  size_t currentAligned = RoundUp(arena->used, align);
-  size_t new_used = currentAligned + bytes_to_alloc;
-
-  if(new_used > arena->capacity)
-  {
-    return(0);
-  }
-  if(ArenaEnsureCommitted(arena, new_used) == 0)
-  {
-    return(0);
-  }
-
-  void* out = arena->base + currentAligned;
-  arena->used = new_used;
-  return out;
-}
-
-void ArenaReset(Arena* arena)
-{
-  arena->used = 0;
-}
-
-void ArenaFree(Arena* arena)
-{
-  if(arena->base)
-  {
-    VirtualFree(arena->base, 0, MEM_RELEASE);
-  }
-  arena->base = 0;
-  arena->used = 0;
-  arena->capacity = 0;
-}
-
-// TODO: see if the check for empty script is needed?
-
-char* ArenaPushString(Arena* arena, const char* s)
-{
-  if(!s)
-  {
-    return(0);
-  }
-  int length = lstrlenA(s) + 1;
-  char* p = (char*) ArenaAlloc(arena, length, 1);
-
-  CopyMemory(p, s, length);
-  return p;
-}
-
-
-// Helpers:
-size_t RoundUp(size_t a, size_t b)
-{
-  return ((a + (b-1)) & ~(b-1));
-}
-
-DWORD ArenaPtrToOffset(const Arena* arena, const void* p)
-{
-    if (!p) return 0;
-    uintptr_t diff = (uintptr_t)p - (uintptr_t)arena->base;
-    return (DWORD)diff;
-}
-
-void* ArenaOffsetToPtr(const Arena* arena, const DWORD off)
-{
-  void* p = (void*)((unsigned char*)(arena->base + off));
-  return p;
-  //return off ? (void*)((unsigned char*)arena->base + off) : NULL;
-}
-
-
-
-
-
 /* Process Data structures testing second iteration:  */
-// TODO: reminder: strings end with \0. thus - when pushing a string into the arena, must account for this.
+// prototypes:
+void CreateProcessEntry(char*, int);
+void CreateLibraryEntry(int, char*, char*);
+int EntryOffsetByPID(int);
+
 typedef struct
 {
   DWORD process_name_offset;
@@ -209,21 +67,12 @@ typedef struct
 {
   DWORD pid;
   Arena processArena;
-  DWORD procInfoOffset; // TODO: This is probably 0
+  DWORD procInfoOffset; // This is supposed to be always 0, but theoretically doesn't have to be
 } ProcessEntry;
 
 #define MAX_PROCESSES 1000
 global_variable ProcessEntry ProcessEntries[MAX_PROCESSES];
 global_variable unsigned int ProcessEntriesCount = 0;
-
-void DecideOnProcess(ProcessInfo* p)
-{
-  //TODO: Temporary!!
-  for(int i = 0; i < MAX_PROCESSES; i++)
-  {
-    
-  }
-}
 
 
 
@@ -242,26 +91,34 @@ void ProcessCreated()
   char handleName[] = "myHandle";
 
 
-  // TODO: move to function (CreateProcessSnapshot())
   
-  /* An array of up to 1000 processes -
-     [ [pid, ptr_to_arena, OffsetOfProcessInfo (0)] , [pid, ptr_to_arena, 0] , .... ]
-     ptr_to_arena points to an arena that has:
-     [ [ProcessInfo], [strings/libs/handles], ... ]
-     
-     so we must:
-     - Allocate the arena for processEntry ( ptr_to_arena should point to an actual arena, allocated with VirtualAlloc by CreateArena)
-     - create the ProcessInfo ( Process info holds offsets for the arena that the entry is pointing to. The processInfo lives ON that same arena )
-     - push ProcessInfo the entries arena.
-     - mockup: - create the LibInfo
-               - push it to the same arena
-	       - update the LibInfo's values
-	       - update the ProcessInfo values
-     - set the global array of entries to point at the next entry
-     - send a message to the list ( LV_SetItemCount )
-     
+  CreateProcessEntry(processName, pid);
+  
+  // Libraries Mockup:
+  CreateLibraryEntry(pid, libName, 0); //TODO: delete this
+		     
+  LV_SetItemCount(ListProcesses, ProcessEntriesCount);
+}
 
-   */
+void CreateLibraryEntry(int pid, char* libName, char* libPath)
+{
+  ProcessEntry entry =  ProcessEntries[EntryOffsetByPID(pid)];
+  ProcessInfo* procInfoPtr = (ProcessInfo*)ArenaOffsetToPtr(&entry.processArena, entry.procInfoOffset);
+  LibInfo* libInfoPtr = (LibInfo*)ARENA_PUSH_STRUCT(&entry.processArena, LibInfo);
+  char* libNamePtr = (char*) ArenaPushString(&entry.processArena, libName);
+  libInfoPtr->name_offset = ArenaPtrToOffset(&entry.processArena, libNamePtr);
+  if(procInfoPtr->libs_count == 0)
+  {
+    procInfoPtr->libs_head_offset = ArenaPtrToOffset(&entry.processArena, libInfoPtr);
+  }
+  
+  procInfoPtr->libs_tail_offset = ArenaPtrToOffset(&entry.processArena, libInfoPtr); 
+  procInfoPtr->libs_count++;
+ 
+}
+
+void CreateProcessEntry(char* processName, int pid)
+{
   ProcessEntry entry = {0};
   entry.processArena = ArenaCreate(ARENA_MAX_CAPACITY);
   entry.pid = pid;
@@ -273,15 +130,22 @@ void ProcessCreated()
   procInfoPtr->process_name_offset = ArenaPtrToOffset(&(entry.processArena), procNamePtr);
 
   ProcessEntries[ProcessEntriesCount++] = entry;
-  
-  // Libraries Mockup:
-  LibInfo libInfo = {0};
-  char* libNamePtr = (char*) ArenaPushString(&(entry.processArena), libName);
-  libInfo.name_offset = ArenaPtrToOffset(&(entry.processArena), libNamePtr);
-
-  LV_SetItemCount(ListProcesses, ProcessEntriesCount);
 }
 
+
+//TODO: Not sure if to return the entry ptr or offset in the array
+//      to be fair, this array should become an arena later, so offset in an arena for a ProcessEntry could be nice
+int EntryOffsetByPID(int pid)
+{
+  for(int i = 0; i < ProcessEntriesCount; i++)
+  {
+    if(ProcessEntries[i].pid == pid)
+    {
+      return(i);
+    }
+  }
+  return -1;
+}
 
 
 /* Program start: */
